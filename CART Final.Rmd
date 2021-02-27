@@ -1,0 +1,302 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+plot(cars)
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
+
+#########################################################################################
+############################### Telco Churn Analysis#####################################
+#########################################################################################
+
+rm(list=ls()); gc()
+
+# Function for installing/Using packages
+usePackage <- function(p) {
+  if (!is.element(p, installed.packages()[,1]))
+    install.packages(p, dep = TRUE)
+  require(p, character.only = TRUE)
+}
+
+usePackage('ggplot2')
+usePackage('caret')         # For Accuracy Calculation
+usePackage('e1071')
+usePackage('rpart.plot')
+usePackage('rattle')
+usePackage('randomForest')
+usePackage('caTools')
+usePackage('descr')
+usePackage('rpart')
+usePackage('RColorBrewer')
+usePackage('knitr')
+usePackage('tidyr')
+usePackage('plyr')
+usePackage('dplyr')
+usePackage('ROCR')
+usePackage('corrplot')
+usePackage('gridExtra')
+usePackage('ggthemes')
+usePackage('ggcorrplot')
+usePackage('tidyverse') 
+usePackage('MASS')
+usePackage('car')
+usePackage('cowplot')
+usePackage('pROC')
+
+################ Data Preprocessing ###############################################
+
+#Data Extraction
+churn <- read.csv(file="C:/Users/CSUFTitan/Desktop/Project 574/WA_Fn-UseC_-Telco-Customer-Churn.csv", stringsAsFactors=T, header=TRUE)
+Churn
+
+str(churn)      # structure of our data frame
+
+dim(churn)      # To check dimension of the data-set
+
+#summary before cleaning
+
+summary(churn)          #statistical information about the data-set
+
+#Removing the missing values
+sapply(churn, function(x) sum(is.na(x)))
+
+#Visualizing NAs in the columns:
+options(repr.plot.width = 6, repr.plot.height = 4) #
+missing_data <- churn %>% summarise_all(funs(sum(is.na(.))/n()))
+missing_data <- gather(missing_data, key = "variables", value = "percent_missing")
+ggplot(missing_data, aes(x = reorder(variables, percent_missing), y = percent_missing)) +
+  geom_bar(stat = "identity", fill = "red", aes(color = I('white')), size = 0.3)+  xlab('variables')+
+  coord_flip()+ 
+  theme_bw()
+
+churn <- churn[complete.cases(churn), ]
+
+#Changing "No internet service" to "No" for six columns:
+cols_recode1 <- c(10:15)
+for(i in 1:ncol(churn[,cols_recode1])) {
+  churn[,cols_recode1][,i] <- as.factor(mapvalues
+                                        (churn[,cols_recode1][,i], from =c("No internet service"),to=c("No")))
+}
+
+#Changing "No phone service" to "No" for column "MultipleLines"
+churn$MultipleLines <- as.factor(mapvalues(churn$MultipleLines, 
+                                           from=c("No phone service"),
+                                           to=c("No")))
+
+min(churn$tenure) #1
+max(churn$tenure) #72
+
+
+#Change the values in column "SeniorCitizen" from 0 or 1 to "No" or "Yes".
+churn$SeniorCitizen <- as.factor(mapvalues(churn$SeniorCitizen,
+                                           from=c("0","1"),
+                                           to=c("No", "Yes")))
+
+
+#Removing the columns we do not need for the analysis
+churn$customerID <- NULL
+
+###################### Classification and Regression Tree #######################################
+
+str(churn)
+
+#splitting the data
+set.seed(123)
+
+#Creating Training and Testing Datasets 
+ind <- sample(2, nrow(churn), replace = T, prob = c(0.7, 0.3))
+#intrain<- createDataPartition(churn$Churn,p=0.7,list=FALSE)
+training<- churn[ind ==1,]    # Training Dataset
+testing<- churn[ind == 2,]    # Testing Dataset
+
+# Dimmensions of both Training and Testing Datasets
+dim(training)
+dim(testing)
+view(training)
+view(testing)
+
+#################### Minimum Error Tree ########################################################
+# Building Minimum Error Tree with all features
+K = 10   # number of cross-validations
+
+set.seed(1)
+tree <- rpart( Churn ~ . , training , method = "class", minsplit=2, maxcompete = 10, minbucket  = 1, cp = 0.001 , xval = K)    # same as using all other variables as predictors
+
+# Displaying results
+pfit = prune(tree, cp = tree$cptable[which.min(tree$cptable[,"xerror"]),"CP"])
+
+rpart.plot( pfit, main = 'Min Error Tree', cex = .5)
+
+# Displaying Complexity Parameter table
+tree$cptable
+
+# graphical representation to the cross validated error summary
+plotcp(tree)
+
+############# Data Prediction ################################################
+#Predictions on validation data
+p = predict( pfit ,testing, type = "class" )
+
+# Building prediction table
+tab = table(p,testing$Churn )
+tab
+
+# Function to calculate specificity and Sensitivity
+sen.spe = function(pred, obs) {
+  tab1 = table(pred, obs)
+  sensitivity = tab1[2,2]/sum(tab1[,2])
+  specificity = tab1[1,1]/sum(tab1[,1])
+  c(sensitivity,specificity)
+}
+
+# Calculating probability of Churn and No Churn
+prob1 = predict(pfit, testing , type = "prob")[,2]
+prob1
+
+# Converting char data into numeric data
+churn_numeric <- as.numeric(ifelse(testing$Churn== 'Yes',1,0)) 
+
+# Predicting class based on probability greater than 0.2
+pred.class1 = as.numeric(prob1 > .2)
+pred.class1
+
+tab1 = table(pred.class1, churn_numeric )
+tab1
+
+sen.spe(pred.class1, churn_numeric)
+
+# Calculating sensitivty and specificity at cutoff of 0.3
+pred.class2 = as.numeric(prob1 > .3)
+pred.class2
+
+tab2 = table(pred.class2, churn_numeric )
+tab2
+
+sen.spe(pred.class2, churn_numeric)
+
+# Calculating sensitivty and specificity at cutoff of 0.4
+pred.class3 = as.numeric(prob1 > .4)
+pred.class3
+
+tab3 = table(pred.class3, churn_numeric )
+tab3
+
+sen.spe(pred.class3, churn_numeric)
+
+
+# Calculating sensitivty and specificity at cutoff of 0.5
+pred.class3 = as.numeric(prob1 > .5)
+pred.class3
+
+tab3 = table(pred.class3, churn_numeric )
+tab3
+
+sen.spe(pred.class3, churn_numeric)
+
+# Calculating overall error for individual cutoff values
+err1 = 1 - mean(pred.class1 == churn_numeric) # cutoff = 0.2
+err1 
+
+err2 = 1 - mean(pred.class2 == churn_numeric) # cutoff = 0.3
+err2
+
+err3 = 1 - mean(pred.class3 == churn_numeric) # cutoff = 0.4
+err3
+
+err4 = 1 - mean(pred.class3 == churn_numeric) # cutoff = 0.5
+err4
+####################### Best Pruned Tree ########################################################
+
+# Best Pruned Tree
+indnew = which.min(pfit$cptable[,"xerror"]) # xerror: cross-validation error
+indnew
+
+se1 = pfit$cptable[indnew,"xstd"]/sqrt(K)   # 1 standard error
+se1
+
+xer1 = min(pfit$cptable[,"xerror"]) + se1   # targeted error: min + 1 SE
+xer1
+
+# absolute difference of cv error with min+1se = xer1
+ind0 = which.min(abs(pfit$cptable[1:indnew,"xerror"] - xer1)) # selected the tree giving closest xerror to xer1
+
+# Pruning and plotting Best Pruned Tree
+pfit.bp = prune(pfit, cp = pfit$cptable[ind0,"CP"])
+rpart.plot(pfit.bp, main = 'Best Pruned Tree', cex = 0.5)
+
+# Displaying Complexity Parameter table
+pfit.bp$cptable
+
+############# Data Prediction ################################################
+#Predictions on validation data
+bp.predict = predict( pfit.bp ,testing, type = "class" )
+
+# Building prediction table
+tab.bp = table(bp.predict,testing$Churn )
+tab.bp
+
+# Calculating probability of Churn and No Churn
+prob.bp1 = predict(pfit.bp, testing , type = "prob")[,2]
+prob.bp1
+
+# Predicting class based on probability greater than 0.2
+pred.bp.class1 = as.numeric(prob.bp1 > .2)
+pred.bp.class1
+
+tab.bp1 = table(pred.bp.class1, churn_numeric )
+tab.bp1
+
+sen.spe(pred.bp.class1, churn_numeric)
+
+# Calculating sensitivty and specificity at cutoff of 0.3
+pred.bp.class2 = as.numeric(prob.bp1 > .3)
+pred.bp.class2
+
+tab.bp2 = table(pred.bp.class2, churn_numeric )
+tab.bp2
+
+sen.spe(pred.bp.class2, churn_numeric)
+
+# Calculating sensitivty and specificity at cutoff of 0.4
+pred.bp.class3 = as.numeric(prob.bp1 > .4)
+pred.bp.class3
+
+tab.bp3 = table(pred.bp.class3, churn_numeric )
+tab.bp3
+
+sen.spe(pred.bp.class3, churn_numeric)
+
+# Calculating sensitivty and specificity at cutoff of 0.5
+pred.bp.class4 = as.numeric(prob.bp1 > .5)
+pred.bp.class4
+
+tab.bp4 = table(pred.bp.class4, churn_numeric )
+tab.bp4
+
+sen.spe(pred.bp.class4, churn_numeric)
+
+# Calculating overall error for individual cutoff values
+err.bp1 = 1 - mean(pred.bp.class1 == churn_numeric) # cutoff = 0.2
+err.bp1 
+
+err.bp2 = 1 - mean(pred.bp.class2 == churn_numeric) # cutoff = 0.3
+err.bp2
+
+err.bp3 = 1 - mean(pred.bp.class3 == churn_numeric) # cutoff = 0.4
+err.bp3
+
+err.bp4 = 1 - mean(pred.bp.class4 == churn_numeric) # cutoff = 0.5
+err.bp4
